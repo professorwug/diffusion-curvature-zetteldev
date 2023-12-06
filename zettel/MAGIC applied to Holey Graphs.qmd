@@ -1,0 +1,101 @@
+---
+title: "MAGIC applied to Holey Graphs"
+format: 
+    html: 
+        code-fold: true
+        keep-md: true
+    gfm:
+        code-annotations: false
+jupyter: python3
+---
+
+```{python}
+#| echo: false
+# project imports go here
+import numpy as np
+
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm, trange
+
+# make the python files in the src directory available to us
+import sys
+sys.path.append('..')
+# import relevant files
+import diffusion_curvature
+from diffusion_curvature.utils import *
+```
+
+First, we need a holey graph. We'll reuse the code from [[Demonstration of Holes in Manifold Graphs]];
+
+```{python}
+import graphtools
+from diffusion_curvature.core import DiffusionCurvature
+from diffusion_curvature.datasets import rejection_sample_from_saddle
+ks_dc = []
+dim = 2
+samplings = [2000]*100
+Xs_sampled = []
+for n_points in tqdm(samplings):
+    X, k = rejection_sample_from_saddle(n_points, dim)
+    Xs_sampled.append(X)
+    # Compute Diffusion Curvature
+    G = graphtools.Graph(X, anisotropy=1, knn=5, decay=None).to_pygsp()
+    DC = DiffusionCurvature(
+        laziness_method="Entropic",
+        flattening_method="Mean Fixed",
+        comparison_method="Subtraction",
+        points_per_cluster=None, # construct separate comparison spaces around each point
+        comparison_space_size_factor=1
+    )
+    ks = DC.curvature(G, t=25, dim=dim, knn=5, idx=0)
+    ks_dc.append(ks)
+# plot a histogram of the diffusion curvatures
+plt.hist(ks_dc, bins=20)
+```
+
+
+```{python}
+# sort em 
+# sort Xs_sorted by the curvatures ks_dc, from highest to lowest
+Xs_sorted = [Xs_sampled[i] for i in np.argsort(ks_dc)[::-1]]
+# Plot the saddle with the most incorrect curvature
+degenerate_X = Xs_sorted[0]
+signal = np.zeros(degenerate_X.shape[0])
+signal[0] = 1
+plot_3d(degenerate_X, signal, title = "A difficult-to-graph saddle", use_plotly=True)
+```
+
+Now we'll apply MAGIC to the `degenerate_X`. The MAGIC algorithm is pretty simple. Just take right multiply the points $X$ by the powered diffusion matrix.
+
+This implementation expects you to supply your own graph constructed from X.
+
+```{python}
+import jax.numpy as jnp
+from diffusion_curvature.graphs import diff_op
+from diffusion_curvature.vne import optimal_t_via_vne
+from diffusion_curvature.heat_diffusion import jax_power_matrix
+
+def magic_denoise_data(
+    X,
+    G,
+    t
+):
+    P = diff_op(G).todense() # is sparse, by default
+    P = jnp.array(P)
+    if t is None: t = optimal_t_via_vne(P)
+    Pt = jax_power_matrix(P,t)
+    # right multiply with data
+    return Pt @ X
+```
+
+We'll start by visualizing this on `degenerate_X`; 
+
+```{python}
+G = graphtools.Graph(degenerate_X, anisotropy=1, knn=5, decay=None).to_pygsp()
+X_magicked = magic_denoise_data(
+    degenerate_X, G, None
+)
+plot_3d(X_magicked, use_plotly=True)
+```
+
+This does abominably – showing that MAGIC is clearly doing exactly the opposite of what we want. By drawing points closer together, it’s turning the manifold into a spider’s web. To make the points more uniform, I actually want to *repel* the points from each other, but while keeping them within the manifold structure.

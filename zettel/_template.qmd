@@ -1,0 +1,29 @@
+---
+title: "Title"
+format: 
+    html: 
+        code-fold: true
+        keep-md: true
+    gfm:
+        code-annotations: false
+jupyter: python3
+---
+
+```{python}
+#| echo: false
+# project imports go here
+import numpy as np
+
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm, trange
+
+# make the python files in the src directory available to us
+import sys
+sys.path.append('..')
+# import relevant files
+import diffusion_curvature
+from diffusion_curvature.utils import *
+```
+
+
+

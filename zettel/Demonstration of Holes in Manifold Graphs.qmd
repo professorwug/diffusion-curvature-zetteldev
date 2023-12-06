@@ -1,0 +1,94 @@
+---
+title: Demonstration of Holes in Manifold Graphs
+format:
+  html: 
+    code-fold: true
+    keep-md: true
+  gfm:
+    code-annotations: false
+jupyter: python3
+---
+
+```{python}
+#| echo: false
+# project imports go here
+import numpy as np
+
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm, trange
+
+# make the python files in the src directory available to us
+import sys
+sys.path.append('..')
+# import relevant files
+import diffusion_curvature
+from diffusion_curvature.utils import plot_3d
+```
+
+We’ve encountered a lot of difficulty as of late with negatively curved surfaces, and – perhaps relatedly – with a huge amount of variance in positively curved surfaces. I think I’ve found the culprit: 
+
+With sparse samplings of the manifold, there are frequently *holes* around the center point from which (in [[Diffusion Curvature and the Curvature Colosseum]]) we measure the curvature. In positively curved manifolds, this isn’t as noticeable; but in negatively curved manifolds it results in a severe misreporting of curvature.
+
+Here’s what I mean. If we sample 100 2-d saddles and take their curvature, the result looks fairly dismal.
+
+```{python}
+import graphtools
+from diffusion_curvature.core import DiffusionCurvature
+from diffusion_curvature.datasets import rejection_sample_from_saddle
+ks_dc = []
+dim = 2
+samplings = [2000]*100
+Xs_sampled = []
+for n_points in tqdm(samplings):
+    X, k = rejection_sample_from_saddle(n_points, dim)
+    Xs_sampled.append(X)
+    # Compute Diffusion Curvature
+    G = graphtools.Graph(X, anisotropy=1, knn=5, decay=None).to_pygsp()
+    DC = DiffusionCurvature(
+        laziness_method="Entropic",
+        flattening_method="Mean Fixed",
+        comparison_method="Subtraction",
+        points_per_cluster=None, # construct separate comparison spaces around each point
+        comparison_space_size_factor=1
+    )
+    ks = DC.curvature(G, t=25, dim=dim, knn=5, idx=0)
+    ks_dc.append(ks)
+# plot a histogram of the diffusion curvatures
+plt.hist(ks_dc, bins=20)
+```
+
+On average, these little beasts are registering as negatively curved - but there are quite a few outliers. Let’s see what’s going on with these outliers, with some detail.
+
+```{python}
+# sort Xs_sorted by the curvatures ks_dc, from highest to lowest
+Xs_sorted = [Xs_sampled[i] for i in np.argsort(ks_dc)[::-1]]
+# Plot the saddle with the most incorrect curvature
+degenerate_X = Xs_sorted[0]
+signal = np.zeros(degenerate_X.shape[0])
+signal[0] = 1
+plot_3d(degenerate_X, signal, title = "A difficult-to-graph saddle", use_plotly=True)
+```
+
+Here's another example:
+
+```{python}
+degenerate_X = Xs_sorted[1]
+signal = np.zeros(degenerate_X.shape[0])
+signal[0] = 1
+plot_3d(degenerate_X, signal, title = "A difficult-to-graph saddle", use_plotly=True)
+```
+
+And another:
+
+```{python}
+degenerate_X = Xs_sorted[2]
+signal = np.zeros(degenerate_X.shape[0])
+signal[0] = 1
+plot_3d(degenerate_X, signal, title = "A difficult-to-graph saddle", use_plotly=True)
+```
+
+These ancdata confirm a suspicion: the graphs of these mis-diagnosed saddles are deranged because they have these big holes close to the center point that give the appearance of positive curvature. Diffusion from the center point is reflected by the boundary of the hole, increasing the perceived laziness.
+
+How to counter this? I have a few ideas. But that's a story for another notebook.
+
+(This is, by the way, the first notebook I’ve authored successfully with [[Zetteldev]], Wherewithal’s new framework for organically-organized literate research.)
